@@ -11,8 +11,9 @@ FORCE:
 build: ## build
 	stack build
 
-test: ## test
-	echo test
+test: FORCE ## test
+	#stack exec c4beta-exe ./xv6-src/xv6-master/types.h
+	stack exec c4beta-exe ./test/test-cases/if1.c
 
 clean: ## clean all the things
 	sh clean.sh
@@ -23,10 +24,6 @@ work: ## open all files in editor
 get_bsim: ## clone the bsim emulator
 	git clone https://github.com/6004x/6.004_tools bsim
 
-setup:
-	touch battle-plan.org
-	mkdir -p design
-
 add: clean ## add files to the git repo
 	git add -A :/
 
@@ -36,6 +33,8 @@ commit: ## git commit -a
 check_for_programs:  ## check to see if all the programs needed are installed
 	git --version
 	stack --version
-
-
+	node --version # for testing.
+	grunt --version
+	@echo
+	@echo "Looks ok.  nb: haven't checked versions"
 

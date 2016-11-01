@@ -1,0 +1,3 @@
+ADDC(R31, 1, R1)
+BF(R1, endif)
+endif:
