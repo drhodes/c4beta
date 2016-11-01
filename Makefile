@@ -19,7 +19,7 @@ clean: ## clean all the things
 	sh clean.sh
 
 work: ## open all files in editor
-	emacs -nw *.v
+	emacs -nw Makefile src/*.hs *cabal
 
 get_bsim: ## clone the bsim emulator
 	git clone https://github.com/6004x/6.004_tools bsim
