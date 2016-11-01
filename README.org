@@ -1,0 +1,31 @@
+* C4Beta
+- A C99 compiler with a BETA backend.
+
+** Register Allocation
+- pick a not t with fewer than k nbrs in RIG
+- eliminate t and its edges from TUG
+- if resulting graph is k-colorable, then so is the original graph
+  
+*** Store everything in memory (BAD)
+*** Store Values in registers (FAST)
+- eliminates memory operation
+- limited number of memory to memory operations.
+  - so many steps just to perform simple addition
+- what can be put in a register?
+- values stored in compiler-generated temps
+- values stored in lcoal scalar variables
+- values stored in array elements and object fields
+  - issue alias analysis.
+- Regster set depends on the data type
+- Fewer instruction when using registers.
+*** Determine live ranges for each value (web)
+*** Detmerine overlapping ranges (interference)
+*** Compute the benefit of keeping each web in a register (spill cost)
+Decide which webs get a register (allocation)
+Split webs if needed (spilling and splitting)
+Assign hard register to webs
+Generate code including 
+
+*** Webs
+- diffuse
+

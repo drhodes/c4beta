@@ -16,6 +16,8 @@ cabal-version:       >=1.10
 library
   hs-source-dirs:      src
   exposed-modules:     Lib
+                     , Types
+                     , RegPool
   build-depends:       base >= 4.7 && < 5
                      , language-c >= 0.4.7
                      , language-c >= 0.4.7
