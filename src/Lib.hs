@@ -1,3 +1,5 @@
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleInstances #-}
 module Lib where
 
 import Data.List
@@ -14,7 +16,7 @@ import Control.Monad.IO.Class
 import Control.Monad
 import qualified Data.List as DL
 import Types
-
+import qualified RegPool as RP
 processFile :: CLanguage -> [String] -> FilePath -> IO ()
 processFile lang cppOpts file =
   do hPutStr stderr $ file ++ ": "
@@ -35,62 +37,73 @@ processFile lang cppOpts file =
                      cTranslUnit tu
 
 
-cTranslUnit :: (Monad m, Show t) => CTranslationUnit t -> m [BetaAsm]
-cTranslUnit (CTranslUnit decls info) =  liftM join $ mapM cExtDecl decls
+--cTranslUnit :: (Monad m, Show t) => CTranslationUnit t -> m [BetaAsm]
+cTranslUnit (CTranslUnit decls info) = liftM join $ mapM (compile RP.new) decls
 
-cExtDecl (CDeclExt decl) = undefined
-cExtDecl (CFDefExt funDef) = cFunDef funDef
-cExtDecl (CAsmExt strLit info) = undefined
+instance Compile (CExternalDeclaration NodeInfo) where
+  compile rp (CDeclExt decl) = undefined
+  compile rp (CFDefExt funDef) = compile rp funDef
+  compile rp (CAsmExt strLit info) = undefined
 
+instance Compile (CFunctionDef NodeInfo) where
 -- cFunDef (CFunDef [CDeclarationSpecifier a] (CDeclarator a) [CDeclaration a] (CStatement a) a
-cFunDef (CFunDef decSpecs declarator declarations stmt info) = do
-  --specs <- mapM cDecSpec decSpecs
-  cStmt stmt
-  --fail $  "undefined: cFunDef (CFunDef decSpecs declarator declarations stmt info)"
+  compile rp (CFunDef decSpecs declarator declarations stmt info) = do
+    --specs <- mapM compile decSpecs
+    compile rp stmt
+    --fail $  "undefined: cFunDef (CFunDef decSpecs declarator declarations stmt info)"
 
-cDecSpec (CStorageSpec spec) = error "undefined: cDecSpec (CStorageSpec spec)"
-cDecSpec (CTypeSpec typeSpec) =error "undefined: cDecSpec (CTypeSpec typeSpec)"
-cDecSpec (CTypeQual typeQual) =error "undefined: cDecSpec (CTypeQual typeQual)"
+instance Compile (CDeclarationSpecifier NodeInfo) where
+  compile rp (CStorageSpec spec) = error "undefined: cDecSpec (CStorageSpec spec)"
+  compile rp (CTypeSpec typeSpec) = error "undefined: cDecSpec (CTypeSpec typeSpec)"
+  compile rp (CTypeQual typeQual) = error "undefined: cDecSpec (CTypeQual typeQual)"
+
+  
+-- cDecSpec :: CDeclarationSpecifier t1 -> t
+-- cDecSpec (CStorageSpec spec) = error "undefined: cDecSpec (CStorageSpec spec)"
+-- cDecSpec (CTypeSpec typeSpec) =error "undefined: cDecSpec (CTypeSpec typeSpec)"
+-- cDecSpec (CTypeQual typeQual) =error "undefined: cDecSpec (CTypeQual typeQual)"
 
 
 -- CDeclr (Maybe Ident) [CDerivedDeclarator a] (Maybe (CStringLiteral a)) [CAttribute a] a
-cDeclr (CDeclr ident derivedDeclarators strLits attrs info) =
-  error "undefined: cDeclr (CDeclr ident derivedDeclarators strLits attrs info)"
-
-
+instance Compile (CDeclarator NodeInfo) where
+  compile rp (CDeclr ident derivedDeclarators strLits attrs info) =
+    error "undefined: cDeclr (CDeclr ident derivedDeclarators strLits attrs info)"
 -- CDecl [CDeclarationSpecifier a] [(Maybe (CDeclarator a), Maybe (CInitializer a), Maybe (CExpression a))] a
-cDecl (CDecl declSpecs triples info) = error "cDecl (CDecl declSpecs triples info) = undefined"
 
-blockStmt (CBlockStmt stmt) = cStmt stmt
-blockStmt (CBlockDecl decl) = cDecl decl
+instance Compile (CDeclaration NodeInfo) where
+  compile rp (CDecl declSpecs triples info) =
+    error "cDecl (CDecl declSpecs triples info) = undefined"
 
+instance Compile (CCompoundBlockItem NodeInfo) where
+  compile rp (CBlockStmt stmt) = compile rp stmt
+  compile rp (CBlockDecl decl) = compile rp decl
 -- GNU C, not implemented yet.
-blockStmt (CNestedFunDef funcDef) = error "undefined: blockStmt (CNestedFunDef funcDef)"
+  compile rp (CNestedFunDef funcDef) = error "undefined: blockStmt (CNestedFunDef funcDef)"
 
 
---cStmt :: Monad m => CStatement t -> m [BetaAsm]
-
-cStmt (CCompound [] blockItems info) = do
-  xs <- mapM blockStmt blockItems -- fail "undefined: cStmt (CCompound [] blockItems info)"
-  return (concat xs)
+instance Compile (CStatement NodeInfo) where
+  compile rp (CCompound [] blockItems info) = do
+    xs <- mapM (compile rp) blockItems -- fail "undefined: cStmt (CCompound [] blockItems info)"
+    return (concat xs)
   
-cStmt (CCompound idents blockItems info) = fail "undefined: cStmt (CCompound idents blockItems info)"
+  compile _ (CCompound idents blockItems info) =
+    fail "undefined: cStmt (CCompound idents blockItems info)"
 
-cStmt (CIf expr stmt1 Nothing info) = do
-  c <- cExpr expr
-  -- if xs represents true, then 
-  ss <- cStmt stmt1
-  
-  return $ concat [ c
-                  , [bf R1 (Label "endif") ]
-                  , ss 
-                  , [Lbl $ Label "endif"] ]
+  compile rp (CIf expr stmt1 Nothing info) = do
+    c <- cExpr expr
+    -- if xs represents true, then 
+    ss <- compile rp stmt1
+    return $ concat [ c
+                    , [bf R1 (Label "endif") ]
+                    , ss 
+                    , [Lbl $ Label "endif"] ]
 -- 
-cStmt (CIf expr stmt1 (Just stmt2) info) = error "undefined: cStmt (CIf expr stmt1 (Just stmt2) info)"
+  compile _ (CIf expr stmt1 (Just stmt2) info) =
+    error "undefined: cStmt (CIf expr stmt1 (Just stmt2) info)"
 
-cStmt (CReturn Nothing info) = return []
-cStmt (CReturn (Just expr) a) = return []
-cStmt x = error (show x)
+  compile _ (CReturn Nothing info) = return []
+  compile _ (CReturn (Just expr) a) = return []
+  compile _ x = fail $ show x
 
 -- cIf = do
 --   rx <- cExpr expr

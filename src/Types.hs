@@ -56,3 +56,5 @@ instance (Show BetaAsm) where
 
 
                
+class Compile a where
+  compile :: (Show a, Monad m) => RegPool -> a -> m [BetaAsm]
