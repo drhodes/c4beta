@@ -33,9 +33,11 @@ instance Show Constant where
 
 data Mneumonic = ADDC
                | BF
+               | BEQ
                deriving (Show, Eq)
                                
-data BetaAsm = Inst3 Mneumonic Reg Constant Reg               
+data BetaAsm = Inst3 Mneumonic Reg Constant Reg
+             | Inst3Label Mneumonic Reg Label Reg               
              | Inst2 Mneumonic Reg Label
              | Lbl Label
              deriving (Eq)
@@ -43,6 +45,10 @@ data BetaAsm = Inst3 Mneumonic Reg Constant Reg
 addc = Inst3 ADDC
 bf = Inst2 BF
 cmove = addc R31
+beq ra label = Inst3Label BEQ ra label R31
+
+br :: Label -> BetaAsm
+br label = beq R31 label
 
 instance (Show BetaAsm) where
   show (Inst3 m r1 c r2) = concat [ show m
@@ -52,9 +58,15 @@ instance (Show BetaAsm) where
                                   , show r2, ")"
                                   ]
   show (Inst2 m x y) = show m ++ "(" ++ show x ++ ", " ++ show y ++ ")"
+  show (Inst3Label m r1 lbl r2) = concat [ show m
+                                         , "("
+                                         , show r1, ", "
+                                         , show lbl, ", "
+                                         , show r2, ")"
+                                         ] 
   show (Lbl l) = show l ++ ":"
 
 
                
 class Compile a where
-  compile :: (Show a, Monad m) => RegPool -> a -> m [BetaAsm]
+  compile :: (Show a, MonadCError m, Monad m) => RegPool -> a -> m [BetaAsm]

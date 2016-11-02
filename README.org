@@ -1,5 +1,6 @@
 * C4Beta
-- A C99 compiler with a BETA backend.
+- A C99 compiler with 32-bit BETA backend.
+-  
 
 ** Register Allocation
 - pick a not t with fewer than k nbrs in RIG
