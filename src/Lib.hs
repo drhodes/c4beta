@@ -40,8 +40,6 @@ body tu lang = do modifyOptions (\opts -> opts { language = lang })
                   analyseAST tu
                   cTranslUnit tu
 
-
-
 --cTranslUnit :: (Monad m, Show t) => CTranslationUnit t -> m [BetaAsm]
 cTranslUnit (CTranslUnit decls info) = liftM join $ mapM (compile RP.new) decls
 
@@ -102,9 +100,10 @@ instance Compile (CStatement NodeInfo) where
     ss <- compile rp stmt1
     
     return $ concat [ cond
-                    , [bf R1 (Label "endif") ]
+                    , [bf R1 (Label "Lendif") ]
                     , ss 
-                    , [Lbl $ Label "endif"] ]
+                    , label "Lendif"
+                    ]
       
   compile rp (CIf expr stmt1 (Just stmt2) info) = do
     cond <- compile rp expr
@@ -122,7 +121,18 @@ instance Compile (CStatement NodeInfo) where
 
   compile _ (CReturn Nothing info) = return []
   compile _ (CReturn (Just expr) a) = return []
+
+  
   compile _ x = fail $ show x
+
+
+
+crtn = [ pop R1
+       , move BP SP
+       , pop BP
+       , pop LP
+       , jmp LP ]
+
 
 instance Compile (CExpression NodeInfo) where
   compile rp (CComma expr info) = fail "cExpr CComma expr info = "

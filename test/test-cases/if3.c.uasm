@@ -1,0 +1,5 @@
+ADDC(R31, 1, R1)
+BF(R1, Lelse)
+BEQ(R31, Lendif, R31)
+Lelse:
+Lendif:
