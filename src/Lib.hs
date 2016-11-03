@@ -18,6 +18,10 @@ import qualified Data.List as DL
 import Types
 import qualified RegPool as RP
 import Language.C.Data.Error
+import qualified BetaCpu.Types as BT
+import BetaCpu.Instructions
+import qualified BetaCpu.ToBeta as TB
+import qualified BetaCpu.Util as BCU
 
 processFile :: CLanguage -> [String] -> FilePath -> IO ()
 processFile lang cppOpts file =
@@ -29,20 +33,36 @@ processFile lang cppOpts file =
        Left err -> hPutStrLn stderr ('\n' : show err)
        Right tu -> case runTrav_ (body tu lang) of
                      Left errs -> hPutStrLn stderr ('\n' : concatMap show errs)
-                     Right (asmProgram, errs) -> do
-                       let prog = concat $ DL.intersperse "\n" (map show asmProgram)
-                       putStrLn outFile
-                       writeFile outFile (prog ++ "\n")
-                     
+                     Right (asm, errs) -> do
+                       --let prog = concat $ DL.intersperse "\n" (map show asmProgram)
+                       BCU.run asm
+                       --writeFile outFile "food" --(prog ++ "\n")
 
-body :: CTranslUnit -> CLanguage -> Trav s [BetaAsm]
+body :: CTranslUnit -> CLanguage -> Trav s BT.AsmEdit
 body tu lang = do modifyOptions (\opts -> opts { language = lang })
                   analyseAST tu
                   cTranslUnit tu
 
---cTranslUnit :: (Monad m, Show t) => CTranslationUnit t -> m [BetaAsm]
-cTranslUnit (CTranslUnit decls info) = liftM join $ mapM (compile RP.new) decls
+folder :: Monad m => [m a] -> m a
+folder [] = fail "Folder can't be called on an empty list"
+folder [x] = x
+folder (x:xs) = x >> (folder xs)
 
+cTranslUnit :: (MonadCError m, Monad m) => CTranslationUnit NodeInfo -> m BT.AsmEdit
+cTranslUnit (CTranslUnit decls info) = do
+  -- nts, RP.new here isn't going to cut it, the register pool spans
+  -- several declarations.
+  xs <- mapM (compile RP.new) decls
+  
+  return $ do
+    docs "Start"
+    folder xs
+    -- docs "Start of translation unit"
+    -- let r = BT.NR "" BT.r0
+    -- add r r r "asdfasdf"
+  -- liftM join $ mapM (compile RP.new) decls
+  
+  
 instance Compile (CExternalDeclaration NodeInfo) where
   compile rp (CDeclExt decl) = undefined
   compile rp (CFDefExt funDef) = compile rp funDef
@@ -77,9 +97,6 @@ instance Compile (CCompoundBlockItem NodeInfo) where
 -- GNU C, not implemented yet.
   compile rp (CNestedFunDef funcDef) = error "undefined: blockStmt (CNestedFunDef funcDef)"
 
-lbl x = Label x
-label x = [Lbl $ Label x]
-
 
 instance Compile (CStatement NodeInfo) where
   compile rp (CCompound [] blockItems info) = do
@@ -90,8 +107,10 @@ instance Compile (CStatement NodeInfo) where
     -- errs <- getErrors
     -- fail $ show errs
     xs <- mapM (compile rp) blockItems -- fail "undefined: cStmt (CCompound [] blockItems info)"
-    return (concat xs)
-  
+    if DL.null xs
+      then return $ docs "empty block"
+      else return $ folder xs
+           
   compile _ (CCompound idents blockItems info) =
     fail "undefined: cStmt (CCompound idents blockItems info)"
 
@@ -99,39 +118,37 @@ instance Compile (CStatement NodeInfo) where
     cond <- compile rp expr
     ss <- compile rp stmt1
     
-    return $ concat [ cond
-                    , [bf R1 (Label "Lendif") ]
-                    , ss 
-                    , label "Lendif"
-                    ]
+    return $ do docs "an if statment without condition"
+                cond
+                --bf R1 (Label "Lendif") 
+                ss 
+                --label "Lendif"
       
-  compile rp (CIf expr stmt1 (Just stmt2) info) = do
-    cond <- compile rp expr
-    s1 <- compile rp stmt1 
-    s2 <- compile rp stmt2
+  -- compile rp (CIf expr stmt1 (Just stmt2) info) = do
+  --   cond <- compile rp expr
+  --   s1 <- compile rp stmt1 
+  --   s2 <- compile rp stmt2
    
-    return $ concat [ cond
-                    , [bf R1 (Label "Lelse")]
-                    , s1
-                    , [br $ lbl "Lendif"]
-                    , label "Lelse"
-                    , s2
-                    , label "Lendif"
-                    ]
+  --   return $ do cond
+  --               bf R1 (Label "Lelse")
+  --               s1
+  --               br $ lbl "Lendif"
+  --               label "Lelse"
+  --               s2
+  --               label "Lendif"
 
-  compile _ (CReturn Nothing info) = return []
-  compile _ (CReturn (Just expr) a) = return []
+  compile _ (CReturn Nothing info) = return $ docs "TODO: return void"
+  compile _ (CReturn (Just expr) a) = return $ docs "TODO: retrurn a value"
 
   
   compile _ x = fail $ show x
 
 
-
-crtn = [ pop R1
-       , move BP SP
-       , pop BP
-       , pop LP
-       , jmp LP ]
+-- crtn = [ pop R1
+--        , move BP SP
+--        , pop BP
+--        , pop LP
+--        , jmp LP ]
 
 
 instance Compile (CExpression NodeInfo) where
@@ -167,7 +184,16 @@ instance Compile (CExpression NodeInfo) where
 
 
 instance Compile (CConstant NodeInfo) where
-  compile rp (CIntConst n _) = return [cmove (IntConstant n) R1]
+  compile rp (CIntConst n info) = do
+    let c = fromIntegral $ getCInteger n :: Int
+    
+    -- build up the assembly in the writer monad
+    -- these four lines are building assembly.
+    return $ do docs "naming constant"
+                let creg = BT.NR "creg" BT.r1
+                BCU.assign_vars [creg]
+                cmove c creg "move constant to register"
+                
   compile rp (CCharConst char _) = fail $ "Haven't implmented: cConstant chars " ++ show char
   compile rp (CFloatConst float _) = fail  $ "Haven't implmented: cConstant floats " ++ show float
   compile ro (CStrConst str _) = fail $ "Haven't implmented: cConstant strings " ++ show str
