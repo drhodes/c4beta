@@ -14,7 +14,8 @@ build: ## build
 test: FORCE ## test
 	#stack exec c4beta-exe ./xv6-src/xv6-master/types.h
 	stack exec c4beta-exe ./test/test-cases/if1.c
-	#stack exec c4beta-exe ./test/test-cases/if2.c
+	# stack exec c4beta-exe ./test/test-cases/if2.c
+	# stack exec c4beta-exe ./test/test-cases/square1.c
 
 clean: ## clean all the things
 	sh clean.sh
