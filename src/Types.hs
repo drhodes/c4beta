@@ -17,7 +17,6 @@ class Compile a where
              -> a              -- ast node
              -> m (BT.AsmEdit, Maybe BT.NReg)   -- writer monad for accumulating assembly.
 
-
 compileSeq :: (Compile a, MonadCError m, Show a)
            => RegPool
            -> [a]
@@ -34,4 +33,5 @@ compileExpr rp x = do
   case r of
     Just reg -> return (c, reg)
     Nothing -> internalErr "Expression doesn't return a virtual register"
-  
+ 
+retReg = (BT.NR "ret" BT.R0) 
