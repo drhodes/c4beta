@@ -1,0 +1,37 @@
+* How to compile the parts of C I don't know how to compile
+** instance Compile (CFunctionDef NodeInfo) where
+What's the problem?
+- still need to preserve registers on function entrace, exit, what the
+  easy way to do this? Use Terman's trick in beta.uasm, just save them
+  all off, but does that macro look like?
+  
+  .macro save_all_regs(WHERE, base_reg) 
+  
+  so the BetaCpu need an explicity ASM insert type.
+  
+- :: cFunDef (CFunDef [CDeclarationSpecifier a] (CDeclarator a) [CDeclaration a] (CStatement a) a
+- =  compile rp func@(CFunDef decSpecs declarator declarations stmt info) = do
+
+- Inside of a function there are identifiers which are associated with
+  values that must be in registers. Virtual registers. Right now the
+  assumption is that register allocation will always work with the
+  simple scheme, no graph coloring. Still ignoring the register
+  exhaustion issue.
+
+- In some function like
+  int add(int arg1, int arg2) {
+    return arg1 + arg2;
+  }
+
+  arg1 is located in the stack. So this requires a load from the stack
+  to a register. load arg2 from stack to a register. run ADD(rx, ry,
+  rz).  put rz into r0, perform exit sequence.  To keep it simple,
+  always do this load, don't worry about figuring out which argument
+  will stay in register.
+  
+- BUT. what happens when the identifier isn't located in the local
+  scope? That's the problem.  Right now, don't worry about that.
+
+- More pressing is where is the symbol table? why are there no names
+  in it? When is the name space table populated?
+

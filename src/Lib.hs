@@ -9,6 +9,10 @@ import Language.C.Analysis.AstAnalysis
 import Language.C.Syntax.AST
 import Language.C.Analysis.TravMonad
 import Language.C.System.GCC
+import Language.C.Analysis.DefTable
+import Language.C.Data.Ident
+import qualified Language.C.Analysis.DeclAnalysis as DA
+import qualified Language.C.Analysis.NameSpaceMap as NSM
 import System.Console.GetOpt
 import System.Environment
 import System.Exit
@@ -25,6 +29,7 @@ import qualified BetaCpu.ToBeta as TB
 import qualified BetaCpu.Util as BCU
 
 
+------------------------------------------------------------------
 processFile :: CLanguage -> [String] -> FilePath -> IO ()
 processFile lang cppOpts file =
   do hPutStr stderr $ file ++ ": "
@@ -39,11 +44,13 @@ processFile lang cppOpts file =
                        TB.toBetaEdit (RP.allocateRegs asm) >>= BCU.dump
                        BCU.run (RP.allocateRegs asm)
                        
+------------------------------------------------------------------
 body :: CTranslUnit -> CLanguage -> Trav s BT.AsmEdit
 body tu lang = do modifyOptions (\opts -> opts { language = lang })
                   analyseAST tu
                   cTranslUnit tu
 
+------------------------------------------------------------------
 setupStack ws@(BT.Words space) =
     do allocate ws "allocation for setup stack"
        br (BT.Label "__start") "branching to start code"
@@ -52,9 +59,12 @@ setupStack ws@(BT.Words space) =
        lbl "__start"
        cmove 0x100 BT.sp "this is setting the stack pointer"
        br (BT.Label "__function_main") "start the show"
-       
 
-cTranslUnit :: (MonadCError m, Monad m) => CTranslationUnit NodeInfo -> m BT.AsmEdit
+
+------------------------------------------------------------------
+cTranslUnit :: (MonadCError m, MonadTrav m, MonadSymtab m, Monad m)
+            => CTranslationUnit NodeInfo -> m BT.AsmEdit
+               
 cTranslUnit (CTranslUnit decls info) = do
   -- nts, RP.new here isn't going to cut it, the register pool logic has nonlocal span.
   --(xs, _) <- liftM DL.unzip $ mapM (compile RP.new) decls
@@ -69,27 +79,45 @@ regFromInfo (NodeInfo _ _ name) = BT.VirtReg $ show (nameId name)
 ------------------------------------------------------------------
 instance Compile (CExternalDeclaration NodeInfo) where
   compile rp (CDeclExt decl) = undefined
-  compile rp (CFDefExt funDef) = compile rp funDef
+  compile rp decl@(CFDefExt funDef) = compile rp funDef
   compile rp (CAsmExt strLit info) = undefined
 
 ------------------------------------------------------------------
 functionNameFromDeclr (CDeclr (Just ident) _ _ _ _) = identToString ident
 functionNameFromDeclr _ = ""
 
-
+------------------------------------------------------------------
 instance Compile (CFunctionDef NodeInfo) where
 -- cFunDef (CFunDef [CDeclarationSpecifier a] (CDeclarator a) [CDeclaration a] (CStatement a) a
-  compile rp (CFunDef decSpecs declarator declarations stmt info) = do
+  compile rp func@(CFunDef decSpecs declarator declarations stmt info) = do
     specs <- compileSeq rp decSpecs
     dector <- compileOne rp declarator
     -- decls <- compileSeq rp declarations  for old style C
     block <- compileOne rp stmt
 
+    analyseFunDef func
+    
     let funcName = functionNameFromDeclr declarator
     let numArgs = length declarations
     
+    table <- liftM identDecls getDefTable
+    let arg1 = Ident "arg1" 0 info :: Ident
+    let zxcv = NSM.globalNames table
+    let wert = NSM.lookupName table arg1
+
+    
     done $ do lbl $ "__function_" ++ funcName
-              blockStart funcName
+              docs "$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$"
+              
+              docs $ show (NSM.hasLocalNames table)
+              -- lookupName :: Ord k => NameSpaceMap k a -> k -> Maybe a
+              
+              case wert of
+                -- Just x -> docs $ show x
+                Nothing -> docs $ "no wert"
+
+              docs $ show arg1
+              blockStart funcName              
               push BT.lp "entry pushing linkage pointer"
               push BT.bp "entry pushing base pointer"
               move BT.sp BT.bp "set base pointer"
@@ -133,6 +161,7 @@ instance Compile (CDerivedDeclarator NodeInfo) where
   -- * New style parameter lists have the form @Right (declarations, isVariadic)@
   compile rp (CFunDeclr (Right (decls, isVariadic)) attrs info) = do
     -- ats <- compileSeq rp attrs
+    mapM_ (compile rp) decls
     ds <- compileSeq rp decls
     done $ do docs ". CDerivedDeclarator.CFunDeclr"
               docs $ show decls
@@ -145,10 +174,11 @@ instance (Compile (CAttribute NodeInfo)) where
     done $ xs --do docs $ ". Cattribute.Cattr"
               -- docs $ show ident
               -- docs $ show xs
-  
+
 ------------------------------------------------------------------
 instance Compile CDecl where
-  compile rp (CDecl declSpecs triples info) = do
+  compile rp decl@(CDecl declSpecs triples info) = do
+    analyseDecl False decl
     dspecs <- compileSeq rp declSpecs
     trips <- compileSeq rp triples
     done $ do docs ". CDecl.CDecl"
@@ -157,25 +187,28 @@ instance Compile CDecl where
     
   --   --fail "cDecl (CDecl declSpecs triples info) = undefined"
 
-
+------------------------------------------------------------------
 instance (Compile ( Maybe (CDeclarator NodeInfo)
                   , Maybe (CInitializer NodeInfo)
                   , Maybe (CExpression NodeInfo))) where
   compile rp (mdecl, minit, mexpr) = do
     md <- case mdecl of Just mdecl' -> compileOne rp mdecl'
-                        Nothing -> return BCU.nop
+                        Nothing -> return $ docs "no mdecl"
     -- what is minit?
     mi <- case minit of Just minit' -> compileOne rp minit'
-                        Nothing -> return BCU.nop
+                        Nothing -> return $ docs "no minit"
+                        
     (me, reg) <- case mexpr of Just mexpr' -> compile rp mexpr'
-                               Nothing -> return (BCU.nop, Nothing)
-      
+                               Nothing -> return (docs "no mexpr", Nothing)
+    
     let code = do docs "compiling triple"
                   md
                   mi
                   me
+                  
     return (code, reg)
   
+------------------------------------------------------------------
 instance (Compile (CInitializer NodeInfo)) where
   compile rp (CInitExpr expr info) = do
     (code, rx) <- compileExpr rp expr
@@ -190,6 +223,8 @@ instance Compile (CCompoundBlockItem NodeInfo) where
 -- GNU C, not implemented yet.
   compile rp (CNestedFunDef funcDef) = error "undefined: blockStmt (CNestedFunDef funcDef)"
 
+
+------------------------------------------------------------------
 instance Compile (CStatement NodeInfo) where
   -- zxcv zxcv zxcv zxcv 
   compile rp (CCompound [] blockItems info) = do
@@ -255,7 +290,6 @@ instance Compile (CStatement NodeInfo) where
                 
   compile _ x = fail $ show x
 
-
 done edit = return (edit, Nothing)
 
 -- preserveAllRegisters = do
@@ -292,9 +326,14 @@ instance Compile (CExpression NodeInfo) where
            , Just rx)
     
   -- cExpr CMember (CExpression a) Ident Bool a
+  
   compile rp c@(CVar ident info) = do
+    -- there's a lot more going on here
+    -- need to find the memory this ident is referring to
+    -- could be local or global.
     let code = do asmIdent $ identToString ident
         rx = regFromInfo info
+        
     return (code, Just rx)
     
   compile rp c@(CConst const) = compile rp const

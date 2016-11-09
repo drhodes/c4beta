@@ -10,14 +10,20 @@ import Language.C.Data.Error
 data RegPool = RegPool { poolInUse :: [BT.Reg]
                        , poolFree :: [BT.Reg]
                        } deriving (Show, Eq)
-                  
+
+
+                                  
 class Compile a where
-  compile :: (Show a, MonadCError m, Monad m)
+  compile :: (Show a, MonadTrav m, MonadCError m, Monad m, MonadSymtab m)
              => RegPool        -- register pool
              -> a              -- ast node
              -> m (BT.AsmEdit, Maybe BT.NReg)   -- writer monad for accumulating assembly.
 
-compileSeq :: (Compile a, MonadCError m, Show a)
+compileSeq :: ( Compile a
+              , MonadTrav m
+              , MonadSymtab m
+              , MonadCError m
+              , Show a)
            => RegPool
            -> [a]
            -> m BT.AsmEdit

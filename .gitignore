@@ -145,3 +145,5 @@ ENV/
 bsim
 docs
 xv6-src
+TAGS
+tags
