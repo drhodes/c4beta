@@ -6,6 +6,9 @@ import qualified BetaCpu.Types as BT
 import Control.Monad
 import qualified Data.List as DL
 import Language.C.Data.Error
+import Data.Functor.Identity
+import Control.Monad.Trans.Writer.Lazy
+import Language.C.Analysis.SemRep
 
 data RegPool = RegPool { poolInUse :: [BT.Reg]
                        , poolFree :: [BT.Reg]
@@ -13,31 +16,30 @@ data RegPool = RegPool { poolInUse :: [BT.Reg]
 
 
                                   
+-- class Compile a where
+--   compile :: (Show a, MonadTrav m, MonadCError m, Monad m, MonadSymtab m)
+--              => RegPool        -- register pool
+--              -> a              -- ast node
+--              -> Trav (BT.AsmEdit, Maybe BT.NReg)   -- writer monad for accumulating assembly.
+
 class Compile a where
-  compile :: (Show a, MonadTrav m, MonadCError m, Monad m, MonadSymtab m)
-             => RegPool        -- register pool
-             -> a              -- ast node
-             -> m (BT.AsmEdit, Maybe BT.NReg)   -- writer monad for accumulating assembly.
-
-compileSeq :: ( Compile a
-              , MonadTrav m
-              , MonadSymtab m
-              , MonadCError m
-              , Show a)
-           => RegPool
-           -> [a]
-           -> m BT.AsmEdit
-compileSeq rp xs = do (code, _) <- liftM DL.unzip $ mapM (compile rp) xs
-                      return $ sequence_ code
+  compile :: a -> Trav GlobalDecls (BT.AsmEdit, Maybe BT.NReg)
 
 
-compileOne rp x = liftM fst $ compile rp x
+compileSeq :: (Compile a) => [a] -> Trav GlobalDecls BT.AsmEdit
+compileSeq xs = do
+  (code, _) <- liftM DL.unzip $ mapM (compile) xs
+  return $ sequence_ code
+
+compileOne x = liftM fst $ compile x
 
 
-compileExpr rp x = do
-  (c, r) <- compile rp x
+compileExpr x = do
+  (c, r) <- compile x
   case r of
     Just reg -> return (c, reg)
     Nothing -> internalErr "Expression doesn't return a virtual register"
  
 retReg = (BT.NR "ret" BT.R0) 
+
+done edit = return (edit, Nothing)
