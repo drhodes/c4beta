@@ -30,6 +30,12 @@ import qualified BetaCpu.ToBeta as TB
 import qualified BetaCpu.Util as BCU
 import qualified Data.Map as DM
 
+debugOn = True
+debugEnter msg = if debugOn
+                 then docs $ "dbg | " ++ msg
+                 else docs "//"
+
+
 ------------------------------------------------------------------
 --processFile :: CLanguage -> [String] -> FilePath -> IO ()
 processFile lang cppOpts file =
@@ -40,7 +46,7 @@ processFile lang cppOpts file =
      case result of
        Left err -> hPutStrLn stderr ('\n' : show err)
        Right tu -> do
-         let temp = runTrav emptyGlobalDecls (body tu lang) 
+         let temp = runTrav (Pile emptyGlobalDecls True) (body tu lang) 
          case temp of
            Left err  -> do
              mapM_ print err
@@ -51,25 +57,26 @@ processFile lang cppOpts file =
              BCU.run (RP.allocateRegs asm)
                
 ------------------------------------------------------------------
-body :: CTranslUnit -> CLanguage -> Trav GlobalDecls BT.AsmEdit
+body :: CTranslUnit -> CLanguage -> Trav Pile BT.AsmEdit
 body tu lang = do modifyOptions (\opts -> opts { language = lang })
-                  analyseAST tu
+                  gdecs <- analyseAST tu
+                  modifyUserState (\_ -> Pile gdecs False)
                   cTranslUnit tu
 ------------------------------------------------------------------
-setupStack ws@(BT.Words space) =
-    do allocate ws "allocation for setup stack"
-       br (BT.Label "__start") "branching to start code"
-       let bytes = space * 4
-       skip bytes
-       lbl "__start"
-       cmove 0x100 BT.sp "this is setting the stack pointer"
-       br (BT.Label "__function_main") "start the show"
+setupStack ws@(BT.Words space) = do
+  allocate ws "allocation for setup stack"
+  br (BT.Label "__start") "branching to start code"
+  
+  let bytes = space * 4
+  skip bytes
+  
+  lbl "__start"
+  cmove 0x100 BT.sp "this is setting the stack pointer"
+  br (BT.Label "__function_main") "start the show"
+
 
 ------------------------------------------------------------------
--- cTranslUnit :: (MonadCError m, MonadTrav m, MonadSymtab m, Monad m)
---             => CTranslationUnit NodeInfo -> Trav m BT.AsmEdit
-
-cTranslUnit :: CTranslationUnit NodeInfo -> Trav GlobalDecls BT.AsmEdit
+cTranslUnit :: CTranslationUnit NodeInfo -> Trav Pile BT.AsmEdit
 cTranslUnit (CTranslUnit decls info) = do
   -- nts, RP.new here isn't going to cut it, the register pool logic has nonlocal span.
   --(xs, _) <- liftM DL.unzip $ mapM (compile RP.new) decls
@@ -94,32 +101,29 @@ functionNameFromDeclr _ = ""
 
 ------------------------------------------------------------------
 instance Compile (CFunctionDef NodeInfo) where
--- cFunDef (CFunDef [CDeclarationSpecifier a] (CDeclarator a) [CDeclaration a] (CStatement a) a
   compile func@(CFunDef decSpecs declarator declarations stmt info) = do
     specs <- compileSeq decSpecs
     dector <- compileOne declarator
     -- decls <- compileSeq declarations  for old style C
     block <- compileOne stmt
 
+    analyseFunDef func
     
     let funcName = functionNameFromDeclr declarator
     let numArgs = length declarations
     table <- liftM identDecls getDefTable
-    let arg1 = Ident "arg1" 0 info :: Ident
-    let zxcv = NSM.globalNames table
-    let wert = NSM.lookupName table arg1
-    us <- liftM gTags getUserState
+    let zxcv = NSM.localNames table
     
-    done $ do lbl $ "__function_" ++ funcName
+    us <- liftM (pileGlobalDecls) getUserState
+    testBool <- liftM pileTestBool getUserState
+    gdecs <- liftM pileGlobalDecls getUserState
+    
+    done $ do docs "-------------------------------------------------------"
+              lbl $ "__function_" ++ funcName
               docs "$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$"
-              docs $ "SIZE OF GLOBALS: " ++ show (DM.size us)
-              docs $ show (NSM.hasLocalNames table)
-              -- lookupName :: Ord k => NameSpaceMap k a -> k -> Maybe a
-              case wert of
-                -- Just x -> docs $ show x
-                Nothing -> docs $ "no wert"
-
-              docs $ show arg1
+              docs $ "SIZE OF GLOBALS: " ++ (show (sizeOfGlobalDecls gdecs))
+              --docs $ "table namespace map: " ++ (
+              -- docs $ (show $ length zxcv)
               blockStart funcName              
               push BT.lp "entry pushing linkage pointer"
               push BT.bp "entry pushing base pointer"
@@ -139,13 +143,16 @@ instance Compile (CDeclarationSpecifier NodeInfo) where
 
 ------------------------------------------------------------------
 instance Compile (CTypeSpecifier NodeInfo) where
-  compile x = done $ docs $ show $ pretty x
+  compile x = done $ debugEnter "Compile (CTypeSpecifier NodeInfo)"
+
+  
 
 ------------------------------------------------------------------
 instance Compile (CDeclarator NodeInfo) where
   compile (CDeclr ident derivedDeclarators strLits attrs info) = do
     ddectors <- compileSeq derivedDeclarators
-    done ddectors
+    done $ do debugEnter "Compile (CDeclarator NodeInfo)"
+              ddectors
                 
   -- CDecl [CDeclarationSpecifier a] [(Maybe (CDeclarator a), Maybe (CInitializer a), Maybe (CExpression a))] a
   -- CDeclr (Maybe Ident) [CDerivedDeclarator a] (Maybe (CStringLiteral a)) [CAttribute a] a
@@ -217,9 +224,6 @@ instance (Compile (CInitializer NodeInfo)) where
     return (code, Just rx)
   
   compile (CInitList initList info) = error ("undefined  (CInitList initList info)")
-
- 
-
   
 ------------------------------------------------------------------
 instance Compile (CCompoundBlockItem NodeInfo) where
@@ -231,7 +235,8 @@ instance Compile (CCompoundBlockItem NodeInfo) where
 
 ------------------------------------------------------------------
 instance Compile (CStatement NodeInfo) where
-  -- zxcv zxcv zxcv zxcv 
+  -- zxcv zxcv zxcv zxcv
+  
   compile (CCompound [] blockItems info) = do
     xs <- compileSeq blockItems -- fail "undefined: cStmt (CCompound [] blockItems info)"
     done $ if DL.null xs
@@ -240,12 +245,13 @@ instance Compile (CStatement NodeInfo) where
 
 
 
-
-  compile (CCompound idents blockItems info) = do
+  -- | compound statement @CCompound localLabels blockItems at@
+  compile (CCompound localLabels blockItems info) = do
     xs <- compileSeq blockItems
     done $ if DL.null xs
            then docs "empty statement block"
-           else xs
+           else do docs $ "localLabels: " ++ show localLabels
+                   xs
 
   -- if statement
   compile (CIf expr stmt1 Nothing info) = do
