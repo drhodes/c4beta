@@ -33,3 +33,26 @@ Generate code including
 *** Webs
 - diffuse
 
+
+
+Current example output
+// -------------------------------------------------------
+__function_main:
+// $$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$
+// SIZE OF GLOBALS: ((51,"objects"),(0,"tags"),(1,"typedefs"))
+// begin block: "main"
+PUSH(LP)                       // entry pushing linkage pointer
+PUSH(BP)                       // entry pushing base pointer
+ADD(SP, R31, BP)               // set base pointer
+ADDC(SP, 0, SP)                // entry seq
+// dbg | Compile (CDeclarator NodeInfo)
+// . CDerivedDeclarator.CFunDeclr
+// []
+// returning
+ADD(R1, R31, R0)               // convention moves the value into R0
+// EXIT SEQUENCE
+ADD(BP, R31, SP)               // deallocate space for locals
+POP(BP)
+POP(LP)
+JMP(LP, R31)
+// end block: "main"
