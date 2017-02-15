@@ -74,7 +74,6 @@ setupStack ws@(BT.Words space) = do
   cmove 0x100 BT.sp "this is setting the stack pointer"
   br (BT.Label "__function_main") "start the show"
 
-
 ------------------------------------------------------------------
 cTranslUnit :: CTranslationUnit NodeInfo -> Trav Pile BT.AsmEdit
 cTranslUnit (CTranslUnit decls info) = do
